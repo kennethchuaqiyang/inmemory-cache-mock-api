@@ -42,7 +42,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +52,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -196,7 +196,11 @@ func getUserHandler(w http.ResponseWriter, r *http.Request) {
 	// the stale entry for us; we're about to overwrite it below).
 	u, err := fetchUserFromDB(ctx, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// pgxpool returns its OWN not-found sentinel (pgx.ErrNoRows), not
+		// database/sql's sql.ErrNoRows — checking for the latter here never
+		// matched, so every missing user fell through to the generic 500
+		// below instead of this intended 404. Fixed 2026-10-16.
+		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
@@ -253,7 +257,8 @@ func updateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	current, err := fetchUserFromDB(ctx, req.UserID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		// Same fix as getUserHandler: pgx.ErrNoRows, not sql.ErrNoRows.
+		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
